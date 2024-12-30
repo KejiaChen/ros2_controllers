@@ -21,14 +21,16 @@
 #include "rclcpp/duration.hpp"
 #include "rclcpp/time.hpp"
 #include "std_msgs/msg/header.hpp"
+#include "rclcpp/rclcpp.hpp"
 
 namespace joint_trajectory_controller
 {
-Trajectory::Trajectory() : trajectory_start_time_(0), time_before_traj_msg_(0) {}
+Trajectory::Trajectory() : trajectory_start_time_(0), time_before_traj_msg_(0), cumulative_time_(0,0){}
 
 Trajectory::Trajectory(std::shared_ptr<trajectory_msgs::msg::JointTrajectory> joint_trajectory)
 : trajectory_msg_(joint_trajectory),
-  trajectory_start_time_(static_cast<rclcpp::Time>(joint_trajectory->header.stamp))
+  trajectory_start_time_(static_cast<rclcpp::Time>(joint_trajectory->header.stamp)),
+  cumulative_time_(0,0)
 {
 }
 
@@ -37,7 +39,8 @@ Trajectory::Trajectory(
   const trajectory_msgs::msg::JointTrajectoryPoint & current_point,
   std::shared_ptr<trajectory_msgs::msg::JointTrajectory> joint_trajectory)
 : trajectory_msg_(joint_trajectory),
-  trajectory_start_time_(static_cast<rclcpp::Time>(joint_trajectory->header.stamp))
+  trajectory_start_time_(static_cast<rclcpp::Time>(joint_trajectory->header.stamp)),
+  cumulative_time_(0,0)
 {
   set_point_before_trajectory_msg(current_time, current_point);
   update(joint_trajectory);
@@ -151,13 +154,57 @@ bool Trajectory::sample(
 
   // time_from_start + trajectory time is the expected arrival time of trajectory
   const auto last_idx = trajectory_msg_->points.size() - 1;
+  const size_t half_idx = last_idx / 2;
   for (size_t i = last_sample_idx_; i < last_idx; ++i)
   {
-    auto & point = trajectory_msg_->points[i];
-    auto & next_point = trajectory_msg_->points[i + 1];
+    // RCLCPP_INFO_STREAM(
+    //   rclcpp::get_logger("joint_trajectory_controller"),
+    //   "Cumulative time: " << cumulative_time_.seconds() << "s " << cumulative_time_.nanoseconds()
+    //                       << "ns");
+    auto & original_point = trajectory_msg_->points[i];
+    auto & original_next_point = trajectory_msg_->points[i + 1];
 
-    const rclcpp::Time t0 = trajectory_start_time_ + point.time_from_start;
-    const rclcpp::Time t1 = trajectory_start_time_ + next_point.time_from_start;
+    // Compute the duration between the current point and the next point
+    rclcpp::Duration current_time_from_start (original_point.time_from_start.sec, original_point.time_from_start.nanosec);
+    rclcpp::Duration next_time_from_start (original_next_point.time_from_start.sec, original_next_point.time_from_start.nanosec);
+    rclcpp::Duration duration_btwn_points = next_time_from_start - current_time_from_start;
+    // RCLCPP_INFO_STREAM(
+    //   rclcpp::get_logger("joint_trajectory_controller"),
+    //   "Duration between points: " << duration_btwn_points.seconds() << "s "
+    //                                << duration_btwn_points.nanoseconds() << "ns");
+
+    // manually scale the duration between points
+    // double scale_factor = (i < half_idx) ? 2.0 : 0.5;  // First half: 0.5x speed, Second half: 2x speed
+    double scale_factor = 2.0;
+    double duration_seconds = duration_btwn_points.seconds();
+    double scaled_duration_seconds = duration_seconds * scale_factor;
+    rclcpp::Duration scaled_duration = rclcpp::Duration::from_seconds(scaled_duration_seconds);
+    // RCLCPP_INFO_STREAM(
+    //   rclcpp::get_logger("joint_trajectory_controller"),
+    //   "Original Duration (seconds): " << duration_seconds);
+    // RCLCPP_INFO_STREAM(
+    //   rclcpp::get_logger("joint_trajectory_controller"),
+    //   "Scaled Duration (seconds): " << scaled_duration_seconds);
+    // RCLCPP_INFO_STREAM(
+    //   rclcpp::get_logger("joint_trajectory_controller"),
+    //   "Scaled Duration between points: " << scaled_duration.seconds() << "s "
+    //                                << scaled_duration.nanoseconds() << "ns");
+
+    // Trajectory time is only for segment durations
+    // The absolute time is obtained from cumulative_time_
+    auto point = original_point;
+    auto next_point = original_next_point;
+    point.time_from_start.sec = cumulative_time_.seconds();
+    point.time_from_start.nanosec = cumulative_time_.nanoseconds() % 1000000000;
+    next_point.time_from_start.sec = (cumulative_time_ + scaled_duration).seconds();
+    next_point.time_from_start.nanosec = (cumulative_time_ + scaled_duration).nanoseconds() % 1000000000;
+    
+    rclcpp::Time t0 = trajectory_start_time_ + point.time_from_start;
+    rclcpp::Time t1 = trajectory_start_time_ + next_point.time_from_start;
+
+    // examine velocity
+    // // if any velocity 
+    // if point.velocities
 
     if (sample_time >= t0 && sample_time < t1)
     {
@@ -169,6 +216,11 @@ bool Trajectory::sample(
       // Do interpolation
       else
       {
+        // logging sampling
+        // RCLCPP_INFO_STREAM(
+        //   rclcpp::get_logger("joint_trajectory_controller"),
+        //   "Sampling between points " << i << " and " << i + 1);
+
         // it changes points only if position and velocity do not exist, but their derivatives
         deduce_from_derivatives(
           point, next_point, state_before_traj_msg_.positions.size(), (t1 - t0).seconds());
@@ -178,7 +230,14 @@ bool Trajectory::sample(
       start_segment_itr = begin() + static_cast<TrajectoryPointConstIter::difference_type>(i);
       end_segment_itr = begin() + static_cast<TrajectoryPointConstIter::difference_type>(i + 1);
       last_sample_idx_ = i;
-      return true;
+      return true; // return early to skip the rest of the loop
+    }else{ 
+      // only change cumulative time when finishing this segment
+      // trajectory_msg_->points[i + 1].time_from_start.sec = scaled_duration.seconds();
+      // trajectory_msg_->points[i + 1].time_from_start.nanosec = scaled_duration.nanoseconds() % 1000000000;
+      cumulative_time_ = cumulative_time_ + scaled_duration;
+      // RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "incrementing cumulative time");
+
     }
   }
 
@@ -187,6 +246,8 @@ bool Trajectory::sample(
   end_segment_itr = end();
   last_sample_idx_ = last_idx;
   output_state = (*start_segment_itr);
+  // clear cumulative time
+  cumulative_time_ = rclcpp::Duration(0,0);
   // the trajectories in msg may have empty velocities/accel, so resize them
   if (output_state.velocities.empty())
   {

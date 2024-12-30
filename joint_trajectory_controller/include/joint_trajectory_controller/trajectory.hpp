@@ -152,6 +152,7 @@ public:
 
   JOINT_TRAJECTORY_CONTROLLER_PUBLIC
   bool is_sampled_already() const { return sampled_already_; }
+  int get_last_sample_index() const { return last_sample_idx_; }
 
   /// Get the index of the segment start returned by the last \p sample() operation.
   /**
@@ -175,6 +176,7 @@ private:
 
   bool sampled_already_ = false;
   size_t last_sample_idx_ = 0;
+  rclcpp::Duration cumulative_time_;
 };
 
 /**
