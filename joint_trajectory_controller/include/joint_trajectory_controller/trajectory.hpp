@@ -23,6 +23,7 @@
 #include "rclcpp/time.hpp"
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
 #include "trajectory_msgs/msg/joint_trajectory_point.hpp"
+
 namespace joint_trajectory_controller
 {
 using TrajectoryPointIter = std::vector<trajectory_msgs::msg::JointTrajectoryPoint>::iterator;
@@ -89,6 +90,7 @@ public:
    * \param[in] sample_time Time at which trajectory will be sampled.
    * \param[in] interpolation_method Specify whether splines, another method, or no interpolation at
    *      all.
+   * \param[in] scaling_factor Velocity scaling factor for the trajectory.
    * \param[out] output_state Calculated new at \p sample_time.
    * \param[out] start_segment_itr Iterator to the start segment for given \p sample_time. See
    *      description above.
@@ -100,7 +102,8 @@ public:
     const rclcpp::Time & sample_time,
     const interpolation_methods::InterpolationMethod interpolation_method,
     trajectory_msgs::msg::JointTrajectoryPoint & output_state,
-    TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr);
+    TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr,
+    double scaling_factor = 1.0);
 
   /**
    * Do interpolation between 2 states given a time in between their respective timestamps
@@ -177,6 +180,8 @@ private:
   bool sampled_already_ = false;
   size_t last_sample_idx_ = 0;
   rclcpp::Duration cumulative_time_;
+
+  // double scaling_factor_;
 };
 
 /**

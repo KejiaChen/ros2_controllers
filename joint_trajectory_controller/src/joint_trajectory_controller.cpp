@@ -134,61 +134,6 @@ controller_interface::return_type JointTrajectoryController::update(
       update_pids();
     }
   }
-
-  // // Dynamically calculate the speed scaling factor
-  // double scaling_factor = 2.0; // Default scaling factor (no change)
-
-  // // Apply scaling to the current trajectory message if necessary
-  // if (traj_external_point_ptr_ && traj_external_point_ptr_->has_trajectory_msg())
-  // {
-  //   auto trajectory_msg = traj_external_point_ptr_->get_trajectory_msg();
-  //   auto new_trajectory_msg = std::make_shared<trajectory_msgs::msg::JointTrajectory>(*trajectory_msg); 
-  //   // scale_trajectory_durations(*trajectory_msg, scaling_factor);
-
-  //   if (!trajectory_msg->points.empty()){
-  //     RCLCPP_INFO(logger, "Incoming trajectory has %zu points.", trajectory_msg->points.size());
-  //     rclcpp::Duration cumulative_time(0, 0);
-  //     for (size_t i = 0; i < trajectory_msg->points.size(); ++i)
-  //     { 
-        
-  //       rclcpp::Duration original_time_from_prev(trajectory_msg->points[i].time_from_start.sec, trajectory_msg->points[i].time_from_start.nanosec);
-      
-  //       if (i > 0)
-  //       {
-  //           rclcpp::Duration prev_time_from_start(trajectory_msg->points[i - 1].time_from_start.sec, trajectory_msg->points[i - 1].time_from_start.nanosec);
-  //           original_time_from_prev = original_time_from_prev - prev_time_from_start;
-  //       }
-
-  //       // Scale the duration and update cumulative time
-  //       rclcpp::Duration scaled_duration = original_time_from_prev * 1.0;
-  //       // RCLCPP_INFO_STREAM(logger, "Scaled duration: " << scaled_duration.seconds() << "s" << scaled_duration.nanoseconds() << "ns");
-        
-  //       // Update cumulative time
-  //       try
-  //       {
-  //         cumulative_time = cumulative_time + scaled_duration;
-  //       }
-  //       catch (const std::overflow_error &e)
-  //       {
-  //         RCLCPP_ERROR(logger, "Overflow detected during time calculation: %s", e.what());
-  //         return controller_interface::return_type::ERROR; // Prevent further processing
-  //       }
-
-  //       new_trajectory_msg->points[i].time_from_start.sec = cumulative_time.seconds();
-  //       new_trajectory_msg->points[i].time_from_start.nanosec = cumulative_time.nanoseconds() % 1000000000;
-
-  //     }
-  //   }
-
-    // // check logic
-    // RCLCPP_INFO_STREAM(logger, "sampled already: " << traj_external_point_ptr_->is_sampled_already());
-    // RCLCPP_INFO_STREAM(logger, "last sample idx: " << traj_external_point_ptr_->get_last_sample_index());
-
-
-  //   RCLCPP_INFO_STREAM(logger, "new trajectory has " << new_trajectory_msg->points.size() << " points.");
-  //   // traj_external_point_ptr_->update(new_trajectory_msg); // Update internal trajectory
-
-  // }
   
   auto compute_error_for_joint = [&](
                                    JointTrajectoryPoint & error, size_t index,
@@ -276,7 +221,7 @@ controller_interface::return_type JointTrajectoryController::update(
     TrajectoryPointConstIter start_segment_itr, end_segment_itr;
     // RCLCPP_INFO(logger, "Sampling trajectory");
     const bool valid_point = traj_external_point_ptr_->sample(
-      time, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr);
+      time, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr, scaling_factor_);
 
     if (valid_point)
     {
@@ -891,6 +836,11 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
     get_node()->create_subscription<trajectory_msgs::msg::JointTrajectory>(
       "~/joint_trajectory", rclcpp::SystemDefaultsQoS(),
       std::bind(&JointTrajectoryController::topic_callback, this, std::placeholders::_1));
+
+  scaling_factor_ = 1.0; // Default scaling factor
+  scaling_factor_subscription_ = get_node()->create_subscription<std_msgs::msg::Float64>(
+    "~/scaling_factor", 10,
+    std::bind(&JointTrajectoryController::scaling_factor_callback, this, std::placeholders::_1));
 
   // State publisher
   RCLCPP_INFO(logger, "Controller state will be published at %.2f Hz.", params_.state_publish_rate);
@@ -1776,6 +1726,13 @@ void JointTrajectoryController::init_hold_position_msg()
     // add velocity, so that trajectory sampling returns acceleration points in any case
     hold_position_msg_ptr_->points[0].accelerations.resize(dof_, 0.0);
   }
+}
+
+void JointTrajectoryController::scaling_factor_callback(const std_msgs::msg::Float64::SharedPtr msg)
+{
+  double velocity_scaling_factor = msg->data;
+  scaling_factor_ = 1/velocity_scaling_factor;
+  // RCLCPP_INFO(get_node()->get_logger(), "Updated duration scaling factor to: %f", scaling_factor_);
 }
 
 }  // namespace joint_trajectory_controller

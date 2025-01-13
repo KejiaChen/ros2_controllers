@@ -95,7 +95,8 @@ bool Trajectory::sample(
   const rclcpp::Time & sample_time,
   const interpolation_methods::InterpolationMethod interpolation_method,
   trajectory_msgs::msg::JointTrajectoryPoint & output_state,
-  TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr)
+  TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr,
+  double scaling_factor)
 {
   THROW_ON_NULLPTR(trajectory_msg_)
 
@@ -175,10 +176,15 @@ bool Trajectory::sample(
 
     // manually scale the duration between points
     // double scale_factor = (i < half_idx) ? 2.0 : 0.5;  // First half: 0.5x speed, Second half: 2x speed
-    double scale_factor = 2.0;
+    if (scaling_factor <= 0.0) {
+      RCLCPP_WARN(rclcpp::get_logger("trajectory_node"), "Invalid scaling factor received, resetting to 1.0");
+      scaling_factor = 1.0;
+    }
+
     double duration_seconds = duration_btwn_points.seconds();
-    double scaled_duration_seconds = duration_seconds * scale_factor;
+    double scaled_duration_seconds = duration_seconds * scaling_factor;
     rclcpp::Duration scaled_duration = rclcpp::Duration::from_seconds(scaled_duration_seconds);
+
     // RCLCPP_INFO_STREAM(
     //   rclcpp::get_logger("joint_trajectory_controller"),
     //   "Original Duration (seconds): " << duration_seconds);
@@ -198,6 +204,11 @@ bool Trajectory::sample(
     point.time_from_start.nanosec = cumulative_time_.nanoseconds() % 1000000000;
     next_point.time_from_start.sec = (cumulative_time_ + scaled_duration).seconds();
     next_point.time_from_start.nanosec = (cumulative_time_ + scaled_duration).nanoseconds() % 1000000000;
+    for (size_t j = 0; j < point.velocities.size(); ++j)
+    {
+      point.velocities[j] /= scaling_factor;;
+      next_point.velocities[j] /= scaling_factor;;
+    }
     
     rclcpp::Time t0 = trajectory_start_time_ + point.time_from_start;
     rclcpp::Time t1 = trajectory_start_time_ + next_point.time_from_start;
@@ -300,6 +311,7 @@ void Trajectory::interpolate_between_points(
 
   if (!has_velocity && !has_accel)
   {
+    // RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Linear Interpolation");
     // do linear interpolation
     for (size_t i = 0; i < dim; ++i)
     {
@@ -320,6 +332,7 @@ void Trajectory::interpolate_between_points(
   else if (has_velocity && !has_accel)
   {
     // do cubic interpolation
+    // RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Cubic Interpolation");
     double T[4];
     generate_powers(3, duration_btwn_points.seconds(), T);
 
@@ -351,6 +364,7 @@ void Trajectory::interpolate_between_points(
   else if (has_velocity && has_accel)
   {
     // do quintic interpolation
+    // RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Quintic Interpolation");
     double T[6];
     generate_powers(5, duration_btwn_points.seconds(), T);
 

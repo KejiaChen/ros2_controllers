@@ -43,6 +43,7 @@
 #include "realtime_tools/realtime_server_goal_handle.hpp"
 #include "trajectory_msgs/msg/joint_trajectory.hpp"
 #include "trajectory_msgs/msg/joint_trajectory_point.hpp"
+#include <std_msgs/msg/float64.hpp>
 
 #include "joint_trajectory_controller_parameters.hpp"
 
@@ -169,6 +170,9 @@ protected:
   rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr joint_command_subscriber_ =
     nullptr;
 
+  rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr scaling_factor_subscription_ = nullptr;
+  double scaling_factor_;
+
   rclcpp::Service<control_msgs::srv::QueryTrajectoryState>::SharedPtr query_state_srv_;
 
   std::shared_ptr<Trajectory> traj_external_point_ptr_ = nullptr;
@@ -291,6 +295,8 @@ private:
     trajectory_msgs::msg::JointTrajectoryPoint & point, size_t size);
   void resize_joint_trajectory_point_command(
     trajectory_msgs::msg::JointTrajectoryPoint & point, size_t size);
+
+  void scaling_factor_callback(const std_msgs::msg::Float64::SharedPtr msg);
 };
 
 }  // namespace joint_trajectory_controller
