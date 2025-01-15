@@ -173,6 +173,8 @@ protected:
   rclcpp::Subscription<std_msgs::msg::Float64>::SharedPtr scaling_factor_subscription_ = nullptr;
   double scaling_factor_;
 
+  bool update_waypoint_;
+
   rclcpp::Service<control_msgs::srv::QueryTrajectoryState>::SharedPtr query_state_srv_;
 
   std::shared_ptr<Trajectory> traj_external_point_ptr_ = nullptr;

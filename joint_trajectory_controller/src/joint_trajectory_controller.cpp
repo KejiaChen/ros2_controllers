@@ -221,7 +221,7 @@ controller_interface::return_type JointTrajectoryController::update(
     TrajectoryPointConstIter start_segment_itr, end_segment_itr;
     // RCLCPP_INFO(logger, "Sampling trajectory");
     const bool valid_point = traj_external_point_ptr_->sample(
-      time, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr, scaling_factor_);
+      time, interpolation_method_, state_desired_, start_segment_itr, end_segment_itr, scaling_factor_, update_waypoint_);
 
     if (valid_point)
     {
@@ -841,6 +841,8 @@ controller_interface::CallbackReturn JointTrajectoryController::on_configure(
   scaling_factor_subscription_ = get_node()->create_subscription<std_msgs::msg::Float64>(
     "~/scaling_factor", 10,
     std::bind(&JointTrajectoryController::scaling_factor_callback, this, std::placeholders::_1));
+
+  update_waypoint_ = false; // Default update waypoint
 
   // State publisher
   RCLCPP_INFO(logger, "Controller state will be published at %.2f Hz.", params_.state_publish_rate);

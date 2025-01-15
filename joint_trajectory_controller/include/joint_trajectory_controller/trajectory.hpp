@@ -103,7 +103,7 @@ public:
     const interpolation_methods::InterpolationMethod interpolation_method,
     trajectory_msgs::msg::JointTrajectoryPoint & output_state,
     TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr,
-    double scaling_factor = 1.0);
+    double scaling_factor = 1.0, bool update_waypoint = false);
 
   /**
    * Do interpolation between 2 states given a time in between their respective timestamps
@@ -173,6 +173,7 @@ private:
 
   std::shared_ptr<trajectory_msgs::msg::JointTrajectory> trajectory_msg_;
   rclcpp::Time trajectory_start_time_;
+  rclcpp::Time last_sample_time_;
 
   rclcpp::Time time_before_traj_msg_;
   trajectory_msgs::msg::JointTrajectoryPoint state_before_traj_msg_;
