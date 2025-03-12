@@ -98,8 +98,7 @@ bool Trajectory::sample(
   const interpolation_methods::InterpolationMethod interpolation_method,
   trajectory_msgs::msg::JointTrajectoryPoint & output_state,
   TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr,
-  double scaling_factor,
-  bool update_waypoint)
+  double scaling_factor)
 {
   THROW_ON_NULLPTR(trajectory_msg_)
 
@@ -159,101 +158,54 @@ bool Trajectory::sample(
     //     "last sample time: " << last_sample_time_.seconds() << "s " << last_sample_time_.nanoseconds() << "ns");
     return true;
   }
-
-  // time_from_start + trajectory time is the expected arrival time of trajectory
+  
   const auto last_idx = trajectory_msg_->points.size() - 1;
   const size_t half_idx = last_idx / 2;
   double duration_seconds = 0.0;
-  rclcpp::Time current_sample_time;
+  rclcpp::Time scaled_sample_time;
+
+  // manually scale the duration between points
+  // double scale_factor = (i < half_idx) ? 2.0 : 0.5;  // First half: 0.5x speed, Second half: 2x speed
+  if (scaling_factor <= 0.0) {
+    RCLCPP_WARN(rclcpp::get_logger("trajectory_node"), "Invalid scaling factor received, resetting to 1.0");
+    scaling_factor = 1.0;
+  }
+
+  // RCLCPP_INFO_STREAM(rclcpp::get_logger("joint_trajectory_controller"),
+  //   "last sample time: " << last_sample_time_.seconds() << "s " << last_sample_time_.nanoseconds() << "ns");
+  rclcpp::Duration duration_btwn_loops = sample_time - last_sample_time_;
+  duration_seconds = duration_btwn_loops.seconds();
+  // RCLCPP_INFO_STREAM(
+  //   rclcpp::get_logger("joint_trajectory_controller"),
+  //   "Duration between loops: " << duration_seconds << "s ");
+
+  double scaled_duration_seconds = duration_seconds * scaling_factor;
+  rclcpp::Duration scaled_duration = rclcpp::Duration::from_seconds(scaled_duration_seconds);
+  // RCLCPP_INFO_STREAM(
+  //   rclcpp::get_logger("joint_trajectory_controller"),
+  //   "Scaled Duration between points: " << scaled_duration.seconds() << "s "
+  //                                << scaled_duration.nanoseconds() << "ns");
+
+  // scale sample time
+  scaled_sample_time = last_sample_time_ + scaled_duration;
+  // RCLCPP_INFO_STREAM(
+  //   rclcpp::get_logger("joint_trajectory_controller"),
+  //   "Scaled Sample Time: " << scaled_sample_time.seconds() << "s "
+  //                            << scaled_sample_time.nanoseconds() << "ns");
+
   for (size_t i = last_sample_idx_; i < last_idx; ++i)
   {
     // RCLCPP_INFO_STREAM(
     //   rclcpp::get_logger("joint_trajectory_controller"),
     //   "Cumulative time: " << cumulative_time_.seconds() << "s " << cumulative_time_.nanoseconds()
     //                       << "ns");
-    auto & original_point = trajectory_msg_->points[i];
-    auto & original_next_point = trajectory_msg_->points[i + 1];
-
-    // manually scale the duration between points
-    // double scale_factor = (i < half_idx) ? 2.0 : 0.5;  // First half: 0.5x speed, Second half: 2x speed
-    if (scaling_factor <= 0.0) {
-      RCLCPP_WARN(rclcpp::get_logger("trajectory_node"), "Invalid scaling factor received, resetting to 1.0");
-      scaling_factor = 1.0;
-    }
-
-    if (update_waypoint){
-      // Compute the duration between the current point and the next point
-      rclcpp::Duration current_time_from_start (original_point.time_from_start.sec, original_point.time_from_start.nanosec);
-      rclcpp::Duration next_time_from_start (original_next_point.time_from_start.sec, original_next_point.time_from_start.nanosec);
-      rclcpp::Duration duration_btwn_points = next_time_from_start - current_time_from_start;
-      // RCLCPP_INFO_STREAM(
-      //   rclcpp::get_logger("joint_trajectory_controller"),
-      //   "Duration between points: " << duration_btwn_points.seconds() << "s "
-      //                                << duration_btwn_points.nanoseconds() << "ns");
-
-      duration_seconds = duration_btwn_points.seconds();
-      
-    } else{
-      // RCLCPP_INFO_STREAM(rclcpp::get_logger("joint_trajectory_controller"),
-      //   "last sample time: " << last_sample_time_.seconds() << "s " << last_sample_time_.nanoseconds() << "ns");
-      rclcpp::Duration duration_btwn_loops = sample_time - last_sample_time_;
-      duration_seconds = duration_btwn_loops.seconds();
-      // RCLCPP_INFO_STREAM(
-      //   rclcpp::get_logger("joint_trajectory_controller"),
-      //   "Duration between loops: " << duration_seconds << "s ");
-    }
-
-    double scaled_duration_seconds = duration_seconds * scaling_factor;
-    rclcpp::Duration scaled_duration = rclcpp::Duration::from_seconds(scaled_duration_seconds);
-
-    // RCLCPP_INFO_STREAM(
-    //   rclcpp::get_logger("joint_trajectory_controller"),
-    //   "Original Duration (seconds): " << duration_seconds);
-    // RCLCPP_INFO_STREAM(
-    //   rclcpp::get_logger("joint_trajectory_controller"),
-    //   "Scaled Duration (seconds): " << scaled_duration_seconds);
-    // RCLCPP_INFO_STREAM(
-    //   rclcpp::get_logger("joint_trajectory_controller"),
-    //   "Scaled Duration between points: " << scaled_duration.seconds() << "s "
-    //                                << scaled_duration.nanoseconds() << "ns");
-
-    auto point = original_point;
-    auto next_point = original_next_point;
-    if (update_waypoint){
-      // Trajectory time is only for segment durations
-      // The absolute time is obtained from cumulative_time_
-
-      // scale waypoint duration
-      point.time_from_start.sec = cumulative_time_.seconds();
-      point.time_from_start.nanosec = cumulative_time_.nanoseconds() % 1000000000;
-      next_point.time_from_start.sec = (cumulative_time_ + scaled_duration).seconds();
-      next_point.time_from_start.nanosec = (cumulative_time_ + scaled_duration).nanoseconds() % 1000000000;
-      if (!point.velocities.empty())
-      {
-        for (size_t j = 0; j < point.velocities.size(); ++j)
-        {
-          point.velocities[j] /= scaling_factor;
-          next_point.velocities[j] /= scaling_factor;
-        }
-      }
-
-      // keep sample time
-      current_sample_time = sample_time;
-    }else{
-      // keep waypoint duration
-
-      // scale sample time
-      current_sample_time = last_sample_time_ + scaled_duration;
-      // RCLCPP_INFO_STREAM(
-      //   rclcpp::get_logger("joint_trajectory_controller"),
-      //   "Scaled Sample Time: " << current_sample_time.seconds() << "s "
-      //                            << current_sample_time.nanoseconds() << "ns");
-    }
+    auto & point = trajectory_msg_->points[i];
+    auto & next_point = trajectory_msg_->points[i + 1];
     
     rclcpp::Time t0 = trajectory_start_time_ + point.time_from_start;
     rclcpp::Time t1 = trajectory_start_time_ + next_point.time_from_start;
 
-    if (current_sample_time >= t0 && current_sample_time < t1)
+    if (scaled_sample_time >= t0 && scaled_sample_time < t1)
     {
       // If interpolation is disabled, just forward the next waypoint
       if (interpolation_method == interpolation_methods::InterpolationMethod::NONE)
@@ -279,14 +231,6 @@ bool Trajectory::sample(
       last_sample_idx_ = i;
       last_sample_time_ = sample_time;
       return true; // return early to skip the rest of the loop
-    }else{ 
-      // only change cumulative time when finishing this segment
-      // trajectory_msg_->points[i + 1].time_from_start.sec = scaled_duration.seconds();
-      // trajectory_msg_->points[i + 1].time_from_start.nanosec = scaled_duration.nanoseconds() % 1000000000;
-      cumulative_time_ = sample_time - trajectory_start_time_;
-      // cumulative_time_ = cumulative_time_ + scaled_duration;
-      // RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "incrementing cumulative time");
-
     }
   }
 
@@ -349,7 +293,7 @@ void Trajectory::interpolate_between_points(
 
   if (!has_velocity && !has_accel)
   {
-    RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Linear Interpolation");
+    // RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Linear Interpolation");
     // do linear interpolation
     for (size_t i = 0; i < dim; ++i)
     {
@@ -370,7 +314,7 @@ void Trajectory::interpolate_between_points(
   else if (has_velocity && !has_accel)
   {
     // do cubic interpolation
-    RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Cubic Interpolation");
+    // RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Cubic Interpolation");
     double T[4];
     generate_powers(3, duration_btwn_points.seconds(), T);
 
@@ -402,7 +346,7 @@ void Trajectory::interpolate_between_points(
   else if (has_velocity && has_accel)
   {
     // do quintic interpolation
-    RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Quintic Interpolation");
+    // RCLCPP_INFO(rclcpp::get_logger("joint_trajectory_controller"), "Quintic Interpolation");
     double T[6];
     generate_powers(5, duration_btwn_points.seconds(), T);
 

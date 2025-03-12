@@ -103,7 +103,7 @@ public:
     const interpolation_methods::InterpolationMethod interpolation_method,
     trajectory_msgs::msg::JointTrajectoryPoint & output_state,
     TrajectoryPointConstIter & start_segment_itr, TrajectoryPointConstIter & end_segment_itr,
-    double scaling_factor = 1.0, bool update_waypoint = false);
+    double scaling_factor = 1.0);
 
   /**
    * Do interpolation between 2 states given a time in between their respective timestamps
